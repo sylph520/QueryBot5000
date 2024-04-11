@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # Copy and decompress the sample data file
-fileid="1imVPNXk8mGU0v9OOhdp0d9wFDuYqARwZ"
-filename="tiramisu-sample.tar.gz"
-html=`curl -c ./cookie -s -L "https://drive.google.com/uc?export=download&id=${fileid}"`
-curl -Lb ./cookie "https://drive.google.com/uc?export=download&`echo ${html}|grep -Po '(confirm=[a-zA-Z0-9\-_]+)'`&id=${fileid}" -o ${filename}
-tar -xvzf ${filename}
+# fileid="1imVPNXk8mGU0v9OOhdp0d9wFDuYqARwZ"
+# filename="tiramisu-sample.tar.gz"
+# # html=`curl -c ./cookie -s -L "https://drive.google.com/uc?export=download&id=${fileid}"`
+# # curl -Lb ./cookie "https://drive.google.com/uc?export=download&`echo ${html}|grep -Po '(confirm=[a-zA-Z0-9\-_]+)'`&id=${fileid}" -o ${filename}
+# wget http://139.224.245.160:8084/d/public/aliyun_share_folder/tiramisu-sample.tar.gz
+# tar -xvzf ${filename}
 
 # Generate and combine query templates
 ./pre-processor/templatizer.py tiramisu --dir tiramisu-sample/ --output templates
@@ -20,4 +21,4 @@ tar -xvzf ${filename}
 
 # Generate ENSEMBLE and HYBRID results
 ./forecaster/generate_ensemble_hybrid.py prediction-results/agg-60/horizon-4320/ar/ prediction-results/agg-60/horizon-4320/noencoder-rnn/ prediction-results/agg-60/horizon-4320/ensemble False
-./forecaster/generate_ensemble_hybrid.py  prediction-results/agg-60/horizon-4320/ensemble prediction-results/agg-60/horizon-4320/kr prediction-results/agg-60/horizon-4320/hybrid True
+./forecaster/generate_ensemble_hybrid.py prediction-results/agg-60/horizon-4320/ensemble prediction-results/agg-60/horizon-4320/kr prediction-results/agg-60/horizon-4320/hybrid True
