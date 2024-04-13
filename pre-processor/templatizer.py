@@ -15,7 +15,8 @@ from multiprocessing import Process
 csv.field_size_limit(sys.maxsize)
 
 TIME_STAMP_STEP = datetime.timedelta(minutes=1)
-STATEMENTS = ['select', 'SELECT', 'INSERT', 'insert', 'UPDATE', 'update', 'delete', 'DELETE']
+STATEMENTS = ['select', 'SELECT', 'INSERT',
+              'insert', 'UPDATE', 'update', 'delete', 'DELETE']
 
 # ==============================================
 # PROJECT CONFIGURATIONS
@@ -55,12 +56,11 @@ def ProcessData(path, output_dir, num_logs, config):
     #           type: (datetime object, string)
 
     # Define time tracker
-    #over_all_start = time.time()
-    #start = time.time()
+    # over_all_start = time.time()
+    # start = time.time()
 
     print("Start processing: " + path)
 
-    data = []
     processed_queries = 0
     templated_workload = dict()
 
@@ -70,32 +70,35 @@ def ProcessData(path, output_dir, num_logs, config):
     try:
         f = gzip.open(path, mode='rt')
         reader = csv.reader(f, delimiter=',')
-        
+
         for query_info in reader:
             processed_queries += 1
 
-            if (not num_logs is None) and processed_queries > num_logs:
+            if (num_logs is not None) and processed_queries > num_logs:
                 break
 
             if config['name'] == 'tiramisu':
                 time_stamp = query_info[0]
-                time_stamp = time_stamp[: -8] # remove milliseconds and the time zone
+                # remove milliseconds and the time zone
+                time_stamp = time_stamp[: -8]
 
             else:
-                if query_info[config['type_index']] != 'Query':  # skip if not a query
+                # skip if not a query
+                if query_info[config['type_index']] != 'Query':
                     continue
 
                 # create timestamp
                 if config['name'] == 'admissions':
                     day = query_info[0]
-                    time = query_info[1].split(".")[0]  # removes the milliseconds
+                    # removes the milliseconds
+                    time = query_info[1].split(".")[0]
                     time_stamp = day + " " + time
 
                 if config['name'] == 'oli':
                     time_stamp = query_info[0]
                     if time_stamp[7] == ' ':
                         time_stamp = time_stamp[0: 7] + '0' + time_stamp[8: -1]
-            #IF
+            # IF
 
             time_stamp = datetime.datetime.strptime(
                 time_stamp, config['time_stamp_format'])
@@ -110,7 +113,7 @@ def ProcessData(path, output_dir, num_logs, config):
 
             if idx < 0:
                 continue
-            
+
             min_timestamp = min(min_timestamp, time_stamp)
             max_timestamp = max(max_timestamp, time_stamp)
 
@@ -121,12 +124,13 @@ def ProcessData(path, output_dir, num_logs, config):
         print("It might be an incomplete file. But we continue anyway.")
         print(e)
 
+    MakeCSVFiles(templated_workload, min_timestamp, max_timestamp,
+                 output_dir + '/' + path.split('/')[-1].split('.gz')[0] + '/')
 
-    MakeCSVFiles(templated_workload, min_timestamp, max_timestamp, output_dir + '/' +
-            path.split('/')[-1].split('.gz')[0] + '/')
+    # end = time.time()
+    # print("Preprocess and template extraction time for %s:\
+    # %s" % (path, str(end - start)))
 
-    #end = time.time()
-    #print("Preprocess and template extraction time for %s: %s" % (path, str(end - start)))
 
 def GetTemplate(query, time_stamp, templated_workload):
     # CHANGE: Returns a dictionary, where keys are templates, and they map to
@@ -135,7 +139,8 @@ def GetTemplate(query, time_stamp, templated_workload):
     STRING_REGEX = r'([^\\])\'((\')|(.*?([^\\])\'))'
     DOUBLE_QUOTE_STRING_REGEX = r'([^\\])"((")|(.*?([^\\])"))'
 
-    INT_REGEX = r'([^a-zA-Z])-?\d+(\.\d+)?' # To prevent us from capturing table name like "a1"
+    # To prevent us from capturing table name like "a1"
+    INT_REGEX = r'([^a-zA-Z])-?\d+(\.\d+)?'
 
     HASH_REGEX = r'(\'\d+\\.*?\')'
 
@@ -171,14 +176,14 @@ def MakeCSVFiles(workload_dict, min_timestamp, max_timestamp, output_dir):
 
     template_count = 0
     for template in workload_dict:
-        #print(template)
+        # print(template)
         template_timestamps = workload_dict[
             template]  # time stamps for ith cluster
-        #time_stamp_dict = collections.OrderedDict()
+        # time_stamp_dict = collections.OrderedDict()
         num_queries_for_template = sum(template_timestamps.values())
 
         # loops over timestamps stepping by TIME_STAMP_STEP
-        #for i in range(
+        # for i in range(
         #        int((max_timestamp - min_timestamp) / TIME_STAMP_STEP) + 1):
         #    time_stamp = min_timestamp + (i * TIME_STAMP_STEP)
         #    if time_stamp in template_timestamps:
@@ -195,27 +200,29 @@ def MakeCSVFiles(workload_dict, min_timestamp, max_timestamp, output_dir):
             template_writer.writerow([num_queries_for_template, template])
             for entry in sorted(template_timestamps.keys()):
                 template_writer.writerow([entry, template_timestamps[entry]])
-            #for entry in time_stamp_dict:
+            # for entry in time_stamp_dict:
             #    template_writer.writerow([entry, time_stamp_dict[entry]])
         csvfile.close()
         template_count += 1
-    
+
     print("Template count: " + str(template_count))
+
 
 def ProcessAnonymizedLogs(input_dir, output_dir, max_log, config):
     target = os.path.join(input_dir, config['files'])
-    files = sorted([ x for x in glob.glob(target) ])
+    files = sorted([x for x in glob.glob(target)])
 
     proc = []
     for i, log_file in enumerate(files):
-        #if i < 45:
+        # if i < 45:
         #    continue
         print(i, log_file)
 
-        #continue
+        # continue
 
         # Process log
-        p = Process(target = ProcessData, args = (log_file, output_dir, max_log, config))
+        p = Process(target=ProcessData,
+                    args=(log_file, output_dir, max_log, config))
         p.start()
         proc.append(p)
 
@@ -228,13 +235,14 @@ def ProcessAnonymizedLogs(input_dir, output_dir, max_log, config):
 # ==============================================
 if __name__ == '__main__':
     aparser = argparse.ArgumentParser(description='Templatize SQL Queries')
-    aparser.add_argument('project', choices=PROJECTS.keys(), help='Data source type')
+    aparser.add_argument('project', choices=PROJECTS.keys(),
+                         help='Data source type')
     aparser.add_argument('--dir', help='Input Data Directory')
     aparser.add_argument('--output', help='Output data directory')
-    aparser.add_argument('--max_log', type=int, help='Maximum number of logs to process in a'
-            'data file. Process the whole file if not provided')
+    aparser.add_argument('--max_log', type=int,
+                         help='Maximum number of logs to process in a'
+                         'data file. Process the whole file if not provided')
     args = vars(aparser.parse_args())
 
-    ProcessAnonymizedLogs(args['dir'], args['output'], args['max_log'], PROJECTS[args['project']])
-    
-
+    ProcessAnonymizedLogs(args['dir'], args['output'],
+                          args['max_log'], PROJECTS[args['project']])

@@ -14,9 +14,11 @@ from multiprocessing import Process
 
 csv.field_size_limit(sys.maxsize)
 
-STATEMENTS = ['select', 'SELECT', 'INSERT', 'insert', 'UPDATE', 'update', 'delete', 'DELETE']
+STATEMENTS = ['select', 'SELECT', 'INSERT',
+              'insert', 'UPDATE', 'update', 'delete', 'DELETE']
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 TIME_STAMP_STEP = datetime.timedelta(minutes=1)
+
 
 def MakeCSVFiles(workload_dict, min_timestamp, max_timestamp, output_dir):
     print("Generating CSV files...")
@@ -45,10 +47,12 @@ def MakeCSVFiles(workload_dict, min_timestamp, max_timestamp, output_dir):
                 template_writer.writerow([entry, template_timestamps[entry]])
         csvfile.close()
         template_count += 1
-    
+
     print("Template count: " + str(template_count))
 
-def AddEntry(template, reader, min_timestamp, max_timestamp, templated_workload):
+
+def AddEntry(template, reader, min_timestamp, max_timestamp,
+             templated_workload):
 
     # Finer process the template a bit to reduce the total template numbers
     template = re.sub(r"&&&", r"#", template)
@@ -65,7 +69,8 @@ def AddEntry(template, reader, min_timestamp, max_timestamp, templated_workload)
     template = re.sub(r"([=<>,!\?])([^ ])", r"\1 \2", template)
     template = re.sub(r"([^ ])=", r"\1 =", template)
 
-    #if (template.find("gradAdmissions2#Test") > 0 and template.find("INSERT") >= 0 and
+    # if (template.find("gradAdmissions2#Test") > 0 and
+    #   template.find("INSERT") >= 0 and
     if (template.find("INSERT") >= 0 and
             template.find("VALUES") > 0):
         template = template[: template.find("VALUES") + 6]
@@ -74,7 +79,7 @@ def AddEntry(template, reader, min_timestamp, max_timestamp, templated_workload)
         time_stamp = datetime.datetime.strptime(line[0], DATETIME_FORMAT)
         count = int(line[1])
 
-        if not template in templated_workload:
+        if template not in templated_workload:
             # add template
             templated_workload[template] = dict()
 
@@ -98,39 +103,39 @@ def Combine(input_dir, output_dir):
 
     target = os.path.join(input_dir, "*/*template*.csv")
     print(target)
-    files = sorted([ x for x in glob.glob(target) ])
+    files = sorted([x for x in glob.glob(target)])
     cnt = 0
     for x in files:
         print(x)
         with open(x, 'r') as f:
             reader = csv.reader(f)
             queries, template = next(reader)
-            #statement = template.split(' ',1)[0]
-            #if not statement in STATEMENTS:
+            # statement = template.split(' ',1)[0]
+            # if not statement in STATEMENTS:
             #    continue
 
             templated_workload, min_timestamp, max_timestamp = AddEntry(template, reader,
-                    min_timestamp, max_timestamp, templated_workload)
+                                                                        min_timestamp, max_timestamp, templated_workload)
 
         cnt += 1
-        #if cnt == 1000:
+        # if cnt == 1000:
         #    break
 
     print(min_timestamp)
     print(max_timestamp)
     with open('templates.txt', 'w') as template_file:
-        [ template_file.write(t + "\n") for t in sorted(templated_workload.keys()) ]
+        [template_file.write(t + "\n")
+         for t in sorted(templated_workload.keys())]
 
     MakeCSVFiles(templated_workload, min_timestamp, max_timestamp, output_dir)
-
-
 
 
 # ==============================================
 # main
 # ==============================================
 if __name__ == '__main__':
-    aparser = argparse.ArgumentParser(description='Templated query csv combiner')
+    aparser = argparse.ArgumentParser(
+        description='Templated query csv combiner')
     aparser.add_argument('--input_dir', help='Input Data Directory')
     aparser.add_argument('--output_dir', help='Output Data Directory')
     args = vars(aparser.parse_args())
