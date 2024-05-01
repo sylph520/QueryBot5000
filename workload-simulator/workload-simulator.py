@@ -169,9 +169,9 @@ DATABASES = {
                          column_name, data_type from information_schema.columns
                          where table_schema not in ('pg_catalog', 'information_schema');""",
         "drop_sql": "DROP INDEX {};",
-        "user": "admin",
-        'pwd': "password",
-        "host": "localhost",
+        # "user": "admin",
+        # 'pwd': "password",
+        "host": "/tmp/",
         "explain_prefix": "explain (format json) ",
     },
 }
@@ -193,7 +193,7 @@ parser.add_argument("--num_queries", type=int, help="Maximum number of queries t
 parser.add_argument('--logical', action='store_true', help="Whether to use the logical clustering result")
 parser.add_argument('--static_suggest', action='store_true', help="Whether to suggest all the"
         "indexes statically")
-parser.add_argument('--project', choices=PROJECTS.keys(), help='Data source type')
+parser.add_argument('--project', choices=PROJECTS.keys(), default='tiramisu', help='Data source type')
 
 
 args = parser.parse_args()
@@ -424,14 +424,16 @@ def connectToPostgresDatabase(config, dbconfig):
     db_name = config['db_name']
 
     try:
-        cnx = psycopg2.connect(host=dbconfig['host'], dbname=db_name, user=dbconfig['user'],
-                password=dbconfig['pwd'])
+        cnx = psycopg2.connect(host=dbconfig['host'], dbname=db_name,
+                # user=dbconfig['user'], password=dbconfig['pwd'],
+                port=51204)
         print("Sucessfuly found database '{}'".format(db_name))
     # Database doesnt exist, needs to be created
     except dbconfig['error'] as err:
         try:
-            cnx = psycopg2.connect(host=dbconfig['host'], dbname='postgres', user=dbconfig['user'],
-                    password=dbconfig['pwd'])
+            cnx = psycopg2.connect(host=dbconfig['host'], dbname='postgres',
+                    user=dbconfig['user'], password=dbconfig['pwd'],
+                    port=51204)
             cnx.autocommit = True
             cursor = cnx.cursor()
             createDatabase(config, dbconfig, cnx, cursor)
