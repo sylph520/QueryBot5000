@@ -66,7 +66,7 @@ class RNN_Model(nn.Module):
         bptt = input.size(0)
         bsz = input.size(1)
         
-        input = input.view(bptt*bsz, -1)
+        input = input.reshape(bptt*bsz, -1)
         emb = self.encoder(input)
         emb = emb.view(bptt, bsz, -1)
         
