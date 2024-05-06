@@ -2,33 +2,32 @@
 
 import os
 import csv
-import fnmatch
 import re
-import sys
 import pickle
-import argparse
 import sqlparse
-import shutil
-import datetime as dt
 from datetime import datetime, timedelta
+from typing import Dict, Tuple
 
 from sortedcontainers import SortedDict
 
 from schemaParser import extract_tables_and_columns
 
+
 class Simulator:
     """Index suggestion algorithm that simulates a basic "what-if" API
 
     We recommend indexes based on the workload forecasting results at the
-    current time stamp. We only recommend single-column indexes here.
+    current time stamp. **We only recommend single-column indexes here**.
     The expected arrival rate of each query template is calculated by the
     predicted arrival rate of the cluster it belongs to and the ratio between
     the volume of this template and the total volume of the cluster.
     The benefit of the index is estimated also by the cardinality of the column
     and whether the query can already use another index.
     """
-    def __init__(self, schema_file, original_path, predicted_path, assignment_path,
-            top_cluster_path, max_cluster_num, aggregate, column_card, static_suggest):
+
+    def __init__(self, schema_file, original_path, predicted_path: list,
+                 assignment_path, top_cluster_path, max_cluster_num,
+                 aggregate, column_card, static_suggest):
         # params
         self.aggregate = aggregate
         self.max_cluster_num = max_cluster_num
@@ -45,19 +44,20 @@ class Simulator:
         sql_schema = open(schema_file, 'r')
         self.schema_dict = extract_tables_and_columns(sql_schema)
 
-        self.data, self.total_queries, self.template_map = LoadOriginalData(original_path)
+        self.data, self.total_queries, self.template_map = LoadOriginalData(
+            original_path)
 
         self.predicted_data = LoadMultiplePredictedData(predicted_path)
 
         tables = self.schema_dict.keys()
 
-        self.templates_dict = GetAccessDict(sorted(self.template_map.values()), tables, self.schema_dict)
+        self.templates_dict = GetAccessDict(
+            sorted(self.template_map.values()), tables, self.schema_dict)
 
         self.last_date = None
         # Clear the total_queries and calculate it online
         for template in self.total_queries:
             self.total_queries[template] = 0
-
 
     def SuggestIndex(self, start_date, duration, index_set):
         predicted_dict = BuildDictionary(self.schema_dict)
@@ -91,23 +91,23 @@ class Simulator:
                         weight = 1
 
                 for pair in template_dict:
-                    predicted_dict[pair] += total_queries[template] * column_card[pair] * weight
+                    predicted_dict[pair] += total_queries[template] * \
+                        column_card[pair] * weight
         else:
             if self.last_date is None:
                 for template in total_queries:
-                    for date in data[template].irange(start_date - timedelta(weeks = 2), start_date):
+                    for date in data[template].irange(start_date - timedelta(weeks=2), start_date):
                         total_queries[template] += data[template][date]
             else:
                 for template in total_queries:
                     for date in data[template].irange(self.last_date, start_date):
                         total_queries[template] += data[template][date]
                 for template in total_queries:
-                    for date in data[template].irange(self.last_date - timedelta(weeks = 2), start_date -
-                            timedelta(weeks = 2)):
+                    for date in data[template].irange(self.last_date - timedelta(weeks=2), start_date -
+                                                      timedelta(weeks=2)):
                         total_queries[template] -= data[template][date]
 
             self.last_date = start_date
-
 
             for date, ass in self.assignment_dict:
                 if date > start_date:
@@ -145,7 +145,8 @@ class Simulator:
                 if self.total_queries[template] < 100 or cluster not in clusters:
                     continue
                 cnt += 1
-                print(type(cluster), cluster, total_queries[template], template[:50])
+                print(type(cluster), cluster,
+                      total_queries[template], template[:50])
 
                 weight = 10000
                 for pair in template_dict:
@@ -155,69 +156,69 @@ class Simulator:
                 print(template)
                 print(weight, "\n")
 
-
                 for j in range(0, 60, aggregate):
                     if j >= duration:
                         break
 
                     for pair in template_dict:
-                        predict_date = next(self.predicted_data[0][cluster].irange(maximum = start_date +
-                            timedelta(minutes = j), reverse = True))
+                        predict_date = next(self.predicted_data[0][cluster].irange(maximum=start_date +
+                                                                                   timedelta(minutes=j), reverse=True))
 
                         predicted_dict[pair] += (predicted_data[0][cluster][predict_date] *
-                            total_queries[template] / total_queries_per_cluster[cluster] * 100 *
-                            column_card[pair] * weight)
-
+                                                 total_queries[template] / total_queries_per_cluster[cluster] * 100 *
+                                                 column_card[pair] * weight)
 
                 for j in range(60, 1440, aggregate):
                     if j >= duration:
                         break
 
                     for pair in template_dict:
-                        predict_date = next(self.predicted_data[1][cluster].irange(maximum = start_date +
-                            timedelta(minutes = j), reverse = True))
+                        predict_date = next(self.predicted_data[1][cluster].irange(maximum=start_date +
+                                                                                   timedelta(minutes=j), reverse=True))
 
                         predicted_dict[pair] += (predicted_data[1][cluster][predict_date] *
-                            total_queries[template] / total_queries_per_cluster[cluster] * 10 *
-                            column_card[pair] * weight)
+                                                 total_queries[template] / total_queries_per_cluster[cluster] * 10 *
+                                                 column_card[pair] * weight)
 
                 for j in range(1440, 10080, aggregate):
                     if j >= duration:
                         break
 
                     for pair in template_dict:
-                        predict_date = next(self.predicted_data[2][cluster].irange(maximum = start_date +
-                            timedelta(minutes = j), reverse = True))
+                        predict_date = next(self.predicted_data[2][cluster].irange(maximum=start_date +
+                                                                                   timedelta(minutes=j), reverse=True))
 
                         predicted_dict[pair] += (predicted_data[2][cluster][predict_date] *
-                            total_queries[template] / total_queries_per_cluster[cluster] * 1 *
-                            column_card[pair] * weight)
+                                                 total_queries[template] / total_queries_per_cluster[cluster] * 1 *
+                                                 column_card[pair] * weight)
 
             print("Valid queries: ", cnt, cnt2)
             print(clusters)
 
-        predicted_sorted_columns = sorted(predicted_dict.items(), key=lambda x: x[1], reverse = True)
+        predicted_sorted_columns = sorted(
+            predicted_dict.items(), key=lambda x: x[1], reverse=True)
 
         for pair in predicted_sorted_columns:
             print(pair)
-            #if pair[1] == 0:
+            # if pair[1] == 0:
             #    break
             if not pair[0] in index_set:
                 return pair[0]
 
         return None
 
-def LoadOriginalData(input_path):
-    datetime_format = "%Y-%m-%d %H:%M:%S" # Strip milliseconds ".%f"
 
-    total_queries = dict()
+def LoadOriginalData(input_path):
+    datetime_format = "%Y-%m-%d %H:%M:%S"  # Strip milliseconds ".%f"
+
+    total_queries: Dict[str, int] = dict()
     min_date = datetime.max
     max_date = datetime.min
-    data = dict()
+    data: Dict[str, Dict[datetime, int]] = dict()
 
     # This is to keep track of our modification to the template. We have to keep the original
     # templates to restore the order in the clustering assignments.
-    modified_template_map = dict()
+    modified_template_map: Dict[str, str] = dict()
 
     for csv_file in sorted(os.listdir(input_path)):
         print(csv_file)
@@ -232,17 +233,17 @@ def LoadOriginalData(input_path):
             # replace '#' with 'param_holder' for sql parsing
             modified_template = modified_template.replace('#', "param_holder")
             # convert to lower case for matching convenience
-            #modified_template = modified_template.lower()
+            # modified_template = modified_template.lower()
             modified_template_map[template] = modified_template
 
-            #print queries, template
+            # print queries, template
             total_queries[template] = int(queries)
 
             # add template
             data[template] = SortedDict()
 
-            #continue
-            
+            # continue
+
             for line in reader:
                 time_stamp = datetime.strptime(line[0], datetime_format)
                 count = int(line[1])
@@ -258,7 +259,7 @@ def LoadOriginalData(input_path):
 def LoadData(file_path, aggregate):
     trajs = dict()
 
-    datetime_format = "%Y-%m-%d %H:%M:%S" # Strip milliseconds ".%f"
+    datetime_format = "%Y-%m-%d %H:%M:%S"  # Strip milliseconds ".%f"
     for csv_file in sorted(os.listdir(file_path)):
         print(csv_file)
 
@@ -268,8 +269,6 @@ def LoadData(file_path, aggregate):
         with open(file_path + "/" + csv_file, 'r') as f:
             reader = csv.reader(f)
 
-            traj = list()
-            date = list()
             cnt = 0
             tot = 0
 
@@ -285,7 +284,8 @@ def LoadData(file_path, aggregate):
 
     return trajs
 
-def LoadMultiplePredictedData(paths):
+
+def LoadMultiplePredictedData(paths: list):
     predicted_data = []
 
     for path in paths:
@@ -303,11 +303,12 @@ def BuildDictionary(schema_dict):
 
     return d
 
+
 def GetAccessDict(templates, tables, schema_dict):
     templates_dict = dict()
 
     for template in templates:
-        #print("processing template: %s" % template)
+        # print("processing template: %s" % template)
         sql = sqlparse.parse(template)[0]
         token_list = [str(x) for x in sql.flatten()]
 
@@ -315,16 +316,20 @@ def GetAccessDict(templates, tables, schema_dict):
 
         table_map = dict()
         before_from = True
-        #print()
-        #print(template)
+        # print()
+        # print(template)
 
         # Find the alias for table names
-        keywords = ['upper', 'lower', 'left', 'right', 'join', 'as', ',', 'group', 'order', 'set']
+        keywords = ['upper', 'lower', 'left', 'right',
+                    'join', 'as', ',', 'group', 'order', 'set', 'where']
         word_regex = re.compile('[\w]+')
+        ## update table_map utilizing tokens between FROM and WHERE
         for i, token in enumerate(token_list):
+            # print(f"{i}: {token}")
             # Only look between from and where
             if token.lower() in ["from", "update"]:
                 before_from = False
+                continue
             if before_from:
                 continue
             if token.lower() in ["set", 'where']:
@@ -338,7 +343,7 @@ def GetAccessDict(templates, tables, schema_dict):
                 if combined_token in tables:
                     table_name = combined_token
 
-            if table_name != None:
+            if table_name is not None:
                 if i < len(token_list) - 2:
                     if token_list[i + 1] == ' ' and token_list[i + 2].lower() not in keywords:
                         if word_regex.match(token):
@@ -350,8 +355,9 @@ def GetAccessDict(templates, tables, schema_dict):
 
                 table_map[table_name] = table_name
 
-        #print("table_map: ", table_map)
+        # print("table_map: ", table_map)
 
+        # print(template)  # lsc debug
         current_table = None
         within_where_clause = False
         for token in token_list:
@@ -359,9 +365,12 @@ def GetAccessDict(templates, tables, schema_dict):
             # That happends with the test table
             if len(table_map) == 0:
                 break
+            elif token == ' ':
+                continue
 
             # only consider columns within where clause
-            if token.lower() in ['select', 'order', 'group', 'returning']:
+            if token.lower() in ['select', 'order', 'group', 'returning',
+                                'order by', 'group by']:
                 within_where_clause = False
 
             if within_where_clause:
@@ -374,7 +383,7 @@ def GetAccessDict(templates, tables, schema_dict):
                         current_table = table_map[token]
                         continue
 
-                    if current_table == None:
+                    if current_table is None:
                         current_table = next(iter(table_map.values()))
 
                     if token in schema_dict[current_table]:
@@ -386,7 +395,7 @@ def GetAccessDict(templates, tables, schema_dict):
                 within_where_clause = True
 
         templates_dict[template] = token_set
-        #print(token_set)
+        # print(token_set)
 
     return templates_dict
 
@@ -395,14 +404,30 @@ def GetAccessDict(templates, tables, schema_dict):
 # main
 # ==============================================
 if __name__ == '__main__':
-    SimulatorObject = Simulator("../workload-simulator/simulatorFiles/combined-results",
-                                ["../workload-simulator/simulatorFiles/online-prediction/ar-60","../workload-simulator/simulatorFiles/online-prediction/ar-1440","../workload-simulator/simulatorFiles/online-prediction/ar-10080"],
-                                "../workload-simulator/simulatorFiles/cluster-coverage/admission-assignments.pickle",
-                                "../workload-simulator/simulatorFiles/cluster-coverage/admission-coverage.pickle",
-                                3,
-                                60
-                                )
+    # SimulatorObject = Simulator("../tiramisu-combined-results",
+    #                             ["../workload-simulator/simulatorFiles/online-prediction/ar-60",
+    #                              "../workload-simulator/simulatorFiles/online-prediction/ar-1440",
+    #                              "../workload-simulator/simulatorFiles/online-prediction/ar-10080"],
+    #                             "../workload-simulator/simulatorFiles/cluster-coverage/admission-assignments.pickle",
+    #                             "../workload-simulator/simulatorFiles/cluster-coverage/admission-coverage.pickle",
+    #                             3,
+    #                             60
+    #                             )
+    cnx, cursor = connectToDatabase(config, dbconfig)
+
+    column_card = getColumnCardinality(config, dbconfig, cnx, cursor)
+
+    card :Dict[Tuple(str, str)] = {}
+    SimulatorObject = Simulator(
+                        schema_file='../mysql/combinedTiramisuSchema.sql',
+                        original_path='../tiramisu-combined-csv',
+                        predicted_path=['../prediction-results/agg-60/horizon-4320/hybrid'],
+                        assignment_path='../online-clustering-results/tiramisu-0.8-assignments.pickle',
+                        top_cluster_path='../cluster-coverage/coverage.pickle',
+                        max_cluster_num=3,
+                        aggregate= 60,
+                        column_card=card,
+                        static_suggest=True
+                        )
     index = SimulatorObject.SuggestIndex(datetime(2017, 1, 1), 300, [])
     print(index)
-
-

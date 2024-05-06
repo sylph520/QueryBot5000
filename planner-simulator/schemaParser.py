@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-
+from typing import Dict
 import collections
 import numpy as np
 np.set_printoptions(threshold=np.inf)
@@ -9,7 +9,7 @@ import re
 
 KEYWORDS = ["KEY", "PRIMARY", "UNIQUE", "CONSTRAINT"]
 
-def extract_tables_and_columns(sql_dump):
+def extract_tables_and_columns(sql_dump) -> Dict[str, Dict[str, int]]:
     """ Extracts the tables and columns from the sql_dump and
     puts them into the semantics dictionary passed in
 

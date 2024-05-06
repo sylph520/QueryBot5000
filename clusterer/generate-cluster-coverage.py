@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-import fnmatch
 import csv
 from datetime import datetime, timedelta
 import datetime as dt
-import sys
 import os
 import pickle
-import numpy as np
 import shutil
 import argparse
+from typing import Dict, Tuple, List
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as plticker
@@ -61,8 +59,8 @@ def LoadData(input_path):
     templates = []
     min_date = datetime.max
     max_date = datetime.min
-    data = dict()
-    data_accu = dict()
+    data: Dict[str, Dict[datetime, int]] = dict()
+    data_accu :Dict[str, Dict[datetime, int]] = dict()
 
     cnt = 0
     for csv_file in sorted(os.listdir(input_path)):
@@ -114,12 +112,7 @@ def LoadData(input_path):
 
     return min_date, max_date, data, data_accu, total_queries, templates
 
-def GenerateData(min_date, max_date, data, data_accu, templates, assignment_dict, total_queries,
-        num_clusters, output_csv_dir):
-    plotted_total = 0
-    plotted_cnt = 0
-    totals = []
-
+def GenerateData(min_date, data: Dict[], data_accu, assignment_dict: Dict[str, int], output_csv_dir):
     coverage_lists = [[] for i in range(MAX_CLUSTER_NUM)]
 
     top_clusters = []
@@ -131,7 +124,7 @@ def GenerateData(min_date, max_date, data, data_accu, templates, assignment_dict
         # Normal full evaluation
         assignment_dict = assignment_dict[0:]
         # used for the micro evaluation only for the spike patterns
-        #assignment_dict = assignment_dict[365:] 
+        #assignment_dict = assignment_dict[365:]
     for current_date, assignments in assignment_dict:
         cluster_totals = dict()
         date_total = 0
@@ -245,8 +238,7 @@ def Main(project, assignment_path, output_csv_dir, output_dir):
         shutil.rmtree(output_csv_dir)
     os.makedirs(output_csv_dir)
 
-    top_clusters, coverage = GenerateData(min_date, max_date, data, data_accu, templates, assignment_dict,
-            total_queries, num_clusters, output_csv_dir)
+    top_clusters, coverage = GenerateData(min_date, data, data_accu, assignment_dict, output_csv_dir)
 
     print(assignment_path, coverage)
 

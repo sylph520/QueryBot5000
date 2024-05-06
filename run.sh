@@ -14,7 +14,7 @@
 
 # Run through clustering algorithm
 ./clusterer/online_clustering.py --dir tiramisu-combined-csv/ --rho 0.8
-./clusterer/generate-cluster-coverage.py --project tiramisu --assignment online-clustering-results/None-0.8-assignments.pickle --output_csv_dir online-clusters/ --output_dir cluster-coverage/
+./clusterer/generate-cluster-coverage.py --project tiramisu --assignment online-clustering-results/tiramisu-0.8-assignments.pickle --output_csv_dir online-clusters/ --output_dir cluster-coverage/
 
 # Run forecasting models
 ./forecaster/run_sample.sh

@@ -20,6 +20,7 @@ from datetime import datetime
 from datetime import timedelta
 from getpass import getpass
 from tqdm import tqdm
+from typing import Dict, Tuple
 
 # Import Simulator
 sys.path.append("../planner-simulator")
@@ -60,12 +61,11 @@ PROJECTS = {
         "db_name": "tiramisu",
         "schema": "../mysql/combinedTiramisuSchema.sql",
         "workload": "tiramisu-out.log",
-        "original_dir": "../time-series-clustering/tiramisu-combined-results",
-        "predict_dirs": ["simulatorFiles/tiramisu-online-prediction/%s-60" % MODEL,
-            "simulatorFiles/tiramisu-online-prediction/%s-1440" % MODEL,
-            "simulatorFiles/tiramisu-online-prediction/%s-10080" % MODEL],
-        "cluster_assignment": "simulatorFiles/cluster-coverage/tiramisu-assignments.pickle",
-        "cluster_coverage": "simulatorFiles/cluster-coverage/tiramisu-coverage.pickle",
+        # "original_dir": "../time-series-clustering/tiramisu-combined-results",
+        "original_dir": "../tiramisu-combined-csv",
+        "predict_dirs": ['../prediction-results/agg-60/horizon-4320/hybrid'],
+        "cluster_assignment": "../online-clustering-results/tiramisu-0.8-assignments.pickle",
+        "cluster_coverage": "../cluster-coverage/coverage.pickle",
         "cluster_num": 3,
         "predict_aggregate": 60,
         "trace_aggregate": 10,
@@ -145,7 +145,7 @@ DATABASES = {
         "index_set_sql": """SELECT DISTINCT TABLE_NAME, COLUMN_NAME FROM
                             INFORMATION_SCHEMA.STATISTICS where table_schema='{}';""",
         "column_set_sql": """SELECT table_name, column_name, DATA_TYPE FROM
-                            INFORMATION_SCHEMA.COLUMNS where table_SCHEMA = 'adm';""",
+                            INFORMATION_SCHEMA.COLUMNS where table_SCHEMA in ('dv', 'r', 'm', 'g', 'h');""",
         "drop_sql": "DROP INDEX `{}` ON {};",
         'pwd': "pass",
         "explain_prefix": "explain format = json ",
@@ -169,7 +169,7 @@ DATABASES = {
                          column_name, data_type from information_schema.columns
                          where table_schema not in ('pg_catalog', 'information_schema');""",
         "drop_sql": "DROP INDEX {};",
-        # "user": "admin",
+        "user": "sclai",
         # 'pwd': "password",
         "host": "/tmp/",
         "explain_prefix": "explain (format json) ",
@@ -181,7 +181,7 @@ DATABASES = {
 ################
 
 parser = argparse.ArgumentParser(description='Populate fake database and simulate workload')
-parser.add_argument("-u", "--username", help="MySQL Log-in username (Default: root)",
+parser.add_argument("-u", "--username", default='sclai', help="MySQL Log-in username (Default: root)",
                     type=str)
 parser.add_argument("--schema", help="SQL schema to populate database")
 parser.add_argument("--rows", help="Number of rows to populate database tables with (Default: 500)",
@@ -219,6 +219,7 @@ NUM_ITERS = 1
 BATCH_LENGTH = 1  # Seconds
 DATA_PROCESSES = 8
 NUM_QUERIES = args.num_queries
+
 CONFIG = PROJECTS[args.project]
 CONFIG["schema"] = args.schema or CONFIG["schema"]
 CONFIG["workload"] = args.workload or CONFIG["workload"]
@@ -301,6 +302,7 @@ class OptimizerThread(threading.Thread):
 ###########################
 
 class ScanStats():
+    """a class for scan statistics in plan"""
     def __init__(self):
         # index scan statistics
         self.seq_q = 0
@@ -432,7 +434,7 @@ def connectToPostgresDatabase(config, dbconfig):
     except dbconfig['error'] as err:
         try:
             cnx = psycopg2.connect(host=dbconfig['host'], dbname='postgres',
-                    user=dbconfig['user'], password=dbconfig['pwd'],
+                    # user=dbconfig['user'], password=dbconfig['pwd'],
                     port=51204)
             cnx.autocommit = True
             cursor = cnx.cursor()
@@ -444,16 +446,29 @@ def connectToPostgresDatabase(config, dbconfig):
             print("ERROR: Failed to connect to PostgreSQL server")
             exit(1)
 
-        cnx = psycopg2.connect(host=dbconfig['host'], dbname=db_name, user=dbconfig['user'],
-                password=dbconfig['pwd'])
+        try:
+            cnx = psycopg2.connect(host=dbconfig['host'], dbname=db_name, port=51204)
+            cnx.autocommit = True
+            cursor = cnx.cursor()
+        except:
+            raise "connection error"
 
-        cnx.autocommit = True
-        cursor = cnx.cursor()
-        createTables(config, dbconfig, cursor)
-
-        # Generate the fake data
-        generateDataMultiProcess(config, dbconfig, cnx, cursor)
-        cursor.close()
+        try:  # create tables and generate fake data
+            createTables(config, dbconfig, cursor)  # from db_config['schema']
+            # Generate the fake data
+            generateDataMultiProcess(config, dbconfig, cnx, cursor)
+            cursor.close()
+        except:
+            cursor.close()
+            cnx.close()
+            cnx = psycopg2.connect(host=dbconfig['host'], dbname='postgres',
+                    # user=dbconfig['user'], password=dbconfig['pwd'],
+                    port=51204)
+            cnx.autocommit = True
+            cursor = cnx.cursor()
+            cursor.execute(f"DROP DATABASE {db_name}")
+            cursor.close()
+            exit(1)
 
     cnx.autocommit = True
     cursor = cnx.cursor()
@@ -461,30 +476,36 @@ def connectToPostgresDatabase(config, dbconfig):
     return cnx, cursor
 
 def connectToDatabase(config, dbconfig):
+    """
+    connect to database if dbconfig[db_name] exists
+    else create the database and populate fake data.
+    """
     if config['db'] == 'mysql':
         cnx = openMySQLConnection(dbconfig)
         cnx.autocommit = True
         cursor = cnx.cursor()
         connectToMySQLDatabase(config, dbconfig, cnx, cursor)
-
-    if config['db'] == 'postgresql':
+    elif config['db'] == 'postgresql':
         cnx, cursor = connectToPostgresDatabase(config, dbconfig)
-
+    else:
+        raise "unknown db"
     return cnx, cursor
 
 # Populates a database with tables using the given schema
 def createTables(config, dbconfig, cursor):
-    schema = config['schema']
+    schema_path = config['schema']
     if config['db'] == 'mysql':
         cursor.execute("SET sql_mode = '';")
 
     print("Populating '{}' with tables...".format(config['db_name']), end="")
     # Split by query
-    schema = open(schema, 'r').read().split(";\n\n")
-    for i in tqdm(range(len(schema)), desc="Creating Tables", ncols=100):
+    with open(schema_path, 'r') as f:
+        schema_str = f.read()
+        schema_sql_list = schema_str.split(";\n\n")
+    for i in tqdm(range(len(schema_sql_list)), desc="Creating Tables", ncols=100):
     #for i in range(len(schema)):
         # theres probably a better way to do this using regex but its 11:51pm and I hate regex
-        query = schema[i] + ";"  # add back ';' lost in splitting
+        query = schema_sql_list[i] + ";"  # add back ';' lost in splitting
         if len(query) < 4:
             continue
         if "USE " in query:
@@ -505,6 +526,7 @@ def createTables(config, dbconfig, cursor):
                 cursor.execute(query)
         except dbconfig['error'] as err:
             print(err)
+            raise f"{err}"
             exit()
             continue
     print("Done!")
@@ -512,13 +534,16 @@ def createTables(config, dbconfig, cursor):
 
 
 def getTables(config, dbconfig, cursor):
+    """rerutn a list of tables"""
     if config['db'] == "mysql":
         cursor.execute("SHOW TABLES;")
         tables = [x[0] for x in cursor]
-    
-    if config['db'] == 'postgresql':
-        cursor.execute("SELECT * FROM pg_tables t WHERE t.tableowner ='{}'".format(dbconfig['user']))
+    elif config['db'] == 'postgresql':
+        # cursor.execute("SELECT * FROM pg_tables t WHERE t.tableowner ='{}'".format(dbconfig['user']))
+        cursor.execute("SELECT * FROM pg_tables t WHERE schemaname in ('dv', 'r', 'm', 'g', 'h')")
         tables = [x[0] + "." + x[1] for x in cursor]
+    else:
+        raise "unknown db type"
 
     return tables
 
@@ -558,50 +583,44 @@ def getColumnTypeSizes(cursor, table_name, table_schema):
 def getData(col_type, size):
     col_type = col_type.upper()
     # INT TYPES
-    if col_type == "TINYINT" or col_type == "BIT":
+    if col_type == "TINYINT" or col_type == "BIT":  # either 0 and 1
         return (random.randint(0,1))
-    elif col_type == "SMALLINT":
+    elif col_type == "SMALLINT":  # random integer between 0 and 2**16-1
         return (random.randint(0, (2**16)-1))
-    elif col_type == "MEDIUMINT":
+    elif col_type == "MEDIUMINT":  # random integer between 0 and 2**24-1
         return (random.randint(0, (2**24)-1))
-    elif col_type in ["INT", "INTEGER", "BIGINT", "OID"]:
+    elif col_type in ["INT", "INTEGER", "BIGINT", "OID"]:  # random integer between 0 and 2**24-1
         return (random.randint(0, (2**24)-1))
-    elif col_type in INT_TYPES and size == None:
+    elif col_type in INT_TYPES and size == None: # other int type -> 1
         return 1
-    
+
     # Boolean Types
     elif col_type in BOOL_TYPES:
         return True if random.randint(0,1) > 0 else False
-
     # Boolean Types
     elif col_type == "POINT":
         return "(" + str(random.randint(0, (2**24)-1)) + ", " + str(random.randint(0,
             (2**16)-1)) + ")"
-
-    elif col_type in LOCATION_TYPES:
+    elif col_type in LOCATION_TYPES:  # -> NULL
         return "NULL"
-
     # Random Types
-    elif col_type in TEXT_TYPES:
+    elif col_type in TEXT_TYPES:  # -> (str)"FakeNews"
         return ("FakeNews")
-    elif col_type == "ENUM":
+    elif col_type == "ENUM":  # -> ""
         return ""
-    elif col_type == "YEAR":
+    elif col_type == "YEAR":  # -> (int)2017
         return 2017
-
     # String Types
-    elif col_type in STRING_TYPES:
+    elif col_type in STRING_TYPES:  # random string in the lowercase
         if size != None:
             return (''.join(random.choice(string.ascii_lowercase) for x in range(size)))
         else:
             return (''.join(random.choice(string.ascii_lowercase) for x in range(10)))
-
-    elif col_type in FLOAT_TYPES:
+    elif col_type in FLOAT_TYPES:  # random float
         return random.random()
-    elif col_type in TIME_TYPES:
+    elif col_type in TIME_TYPES: # the current dateitme
         return datetime.now()
-
-    else:
+    else:  # -> None
         return None
 
 def getEnumData(config, cursor, table_schema, table_name, col):
@@ -632,8 +651,9 @@ def generateDataMultiProcess(config, dbconfig, cnx, cursor):
     proc = []
     for i in range(DATA_PROCESSES):
         # Process log
-        p = Process(target = generateData, args = (config, dbconfig, tables[i * process_size:
-                (i + 1) * process_size]))
+        p = Process(target = generateData, args = (
+                config, dbconfig, tables[i*process_size: (i+1)*process_size])
+                )
         p.start()
         proc.append(p)
 
@@ -658,14 +678,17 @@ def generateData(config, dbconfig, tables):
 
     for i in tqdm(range(len(tables)), desc="Generating Fake Data", ncols=100):
         table = tables[i]
+
+        # set table_name, table_schema
         if config['db'] == 'mysql':
             table_name = table
             table_schema = config['db_name']
-
-        if config['db'] == 'postgresql':
+        elif config['db'] == 'postgresql':
             table_split = table.split(".")
             table_name = table_split[1]
             table_schema = table_split[0]
+        else:
+            raise "unknown db"
 
         columns = getColumns(cursor, table_name, table_schema) # columns for table
         types = getColumnTypes(cursor, table_name, table_schema)
@@ -679,7 +702,7 @@ def generateData(config, dbconfig, tables):
         for i in range(ROWS):
             # Get fake data for 1 row
             INSERT_DATA = []
-            for j in range(len(columns)):
+            for j in range(len(columns)):  # for each column of the row i
                 col_name = columns[j]
                 col_type = types[j].upper()
                 if col_type in ["ENUM", "SET", "USER-DEFINED"]: # chose a random one for SET data
@@ -698,7 +721,7 @@ def generateData(config, dbconfig, tables):
                         print("If this prints yell at Gus to cover all SQL types :)")
                         exitDatabase(cnx, cursor)
             #ALL_DATA.append(tuple(INSERT_DATA))
-            try:
+            try:  # insert data into the database
                 cursor.execute(INSERT_STRING, INSERT_DATA)
             except dbconfig['error'] as err:
                 #print("\n")
@@ -928,6 +951,7 @@ def executeQuery(config, dbconfig, batch):
     latency = []
     timeout = time.time() + BATCH_LENGTH  # 1 Second
     while ((time.time() < timeout) and (curr_q < len(batch) - 1)):
+        # get plan via EXPLAIN, and update scan_stats instance
         try:
             curr_q += 1
             start_time = time.time()
@@ -978,11 +1002,11 @@ def executeQuery(config, dbconfig, batch):
             res = (exec_q, curr_q, latency, scan_stats)
 
         except dbconfig['error'] as err:
-            #print("\n")
-            #print(batch[curr_q][1])
-            #print(err)
-            #print("\n")
-            #input("break")
+            print("\n")
+            print(batch[curr_q][1])
+            print(err)
+            print("\n")
+            input("break")
             continue
     cnx.commit()
 
@@ -1040,7 +1064,7 @@ def runTrace(config, dbconfig, cnx, cursor):
 
     # Store Threads
     simThreads = []
-    
+
     # Don't pollute the real output in explain mode
     if not EXPLAIN:
         result_file = "results-" + MODEL + "/" + config['output_file']
@@ -1070,6 +1094,7 @@ def runTrace(config, dbconfig, cnx, cursor):
 
             for j in range(0, NUM_MINUTES, config["trace_aggregate"]):
                 curr_timestamp = MIN_TIMESTAMP + timedelta(minutes=j)
+                # extract a batch from file_lines
                 batch, file_lines = getBatch(curr_timestamp +
                         timedelta(minutes=config["trace_aggregate"]), file_lines)
 
@@ -1147,9 +1172,12 @@ def runTrace(config, dbconfig, cnx, cursor):
     print("Done!")
 
 def getColumnCardinality(config, dbconfig, cnx, cursor):
+    """
+    output: Dict((table, column): card)
+    """
     cursor.execute(dbconfig['column_set_sql'])
     columns = cursor.fetchall()
-    card_dict = {}
+    card_dict: Dict[Tuple(str, str)] = {}
     for table, column, data_type in columns:
         data_type = data_type.upper()
 
@@ -1174,14 +1202,13 @@ if __name__ == '__main__':
     column_card = getColumnCardinality(config, dbconfig, cnx, cursor)
 
     SimulatorObject = Simulator(config['schema'],
-                                config['original_dir'],
-                                config['predict_dirs'],
-                                config['cluster_assignment'],
-                                config['cluster_coverage'],
-                                config['cluster_num'],
-                                config['predict_aggregate'],
-                                column_card,
-                                STATIC_SUGGEST
+                                config['original_dir'], config['predict_dirs'],
+                                assignment_path=config['cluster_assignment'],
+                                top_cluster_path=config['cluster_coverage'],
+                                max_cluster_num=config['cluster_num'],
+                                aggregate=config['predict_aggregate'],
+                                column_card=column_card,
+                                static_suggest=STATIC_SUGGEST
                                 )
 
     runTrace(config, dbconfig, cnx, cursor)

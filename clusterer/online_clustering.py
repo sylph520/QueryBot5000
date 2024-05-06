@@ -13,7 +13,7 @@ import random
 import pickle
 import re
 import math
-from typing import Dict
+from typing import Dict, Tuple, List
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as plticker
@@ -44,7 +44,7 @@ STATEMENTS = ['select', 'SELECT', 'INSERT',
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"  # Strip milliseconds ".%f"
 
 
-def LoadData(input_path):
+def LoadData(input_path) -> Tuple[datetime, datetime, Dict[str, Dict[datetime, int]], Dict[str, int], List[str]]:
     total_queries = dict()
     templates = []
     min_date = datetime.max
@@ -145,8 +145,10 @@ def AddToCenter(center: Dict[datetime, int],
     return total
 
 
-def AdjustCluster(min_date, current_date, next_date, data, last_ass, next_cluster, centers,
-                  cluster_totals, total_queries, cluster_t_sizes, rho):
+def AdjustCluster(min_date: datetime, current_date: datetime, next_date: datetime,
+                  data: dict, last_ass: Dict[str,int], next_cluster_id: int, centers: dict,
+                  cluster_totals: dict, total_queries: Dict[str,int], cluster_t_sizes: dict,
+                  rho: float) -> Tuple[Dict[str, int], int]:
     n_minutes = (next_date - min_date).seconds // 60 + \
         (next_date - min_date).days * 1440 + 1
     num_sample = 10000
@@ -187,10 +189,7 @@ def AdjustCluster(min_date, current_date, next_date, data, last_ass, next_cluste
 
     cnt = 0
     for t in sorted(data.keys()):
-        """
-        for all tempaltes in data, cluster the data within the time interval
-        into clusters
-        """
+        # for all tempaltes in data, cluster templates within the time interval into clusters
         cnt += 1
         # Test whether this template still belongs to the original cluster
         if new_ass[t] != -1:
@@ -242,18 +241,18 @@ def AdjustCluster(min_date, current_date, next_date, data, last_ass, next_cluste
 
         if new_ass[t] == -1:  # new cluster
             print("%s: template %s created cluster as %d with total %d" % (next_date, cnt,
-                                                                           next_cluster, total_queries[t]))
+                                                                           next_cluster_id, total_queries[t]))
         else:
             print("%s: template %s recreated cluster as %d with total %d" % (next_date, cnt,
-                                                                             next_cluster, total_queries[t]))
+                                                                             next_cluster_id, total_queries[t]))
 
-        new_ass[t] = next_cluster
-        centers[next_cluster] = SortedDict()
-        AddToCenter(centers[next_cluster], min_date, next_date, data[t])
-        cluster_t_sizes[next_cluster] = 1
-        cluster_totals[next_cluster] = 0
+        new_ass[t] = next_cluster_id
+        centers[next_cluster_id] = SortedDict()
+        AddToCenter(centers[next_cluster_id], min_date, next_date, data[t])
+        cluster_t_sizes[next_cluster_id] = 1
+        cluster_totals[next_cluster_id] = 0
 
-        next_cluster += 1
+        next_cluster_id += 1
 
     cluster_ids = list(centers.keys())
     # a union-find set to track the root cluster for clusters that have been merged
@@ -321,42 +320,51 @@ def AdjustCluster(min_date, current_date, next_date, data, last_ass, next_cluste
 
             print("%s: cluster %d merged into cluster %d" % (next_date, c1, c))
 
-    return new_ass, next_cluster
+    return new_ass, next_cluster_id
 
 
-def OnlineClustering(min_date, max_date,
-        data: Dict[str, Dict[datetime, int]], total_queries, rho):
+def OnlineClustering(min_date: datetime, max_date: datetime,
+        data: Dict[str, Dict[datetime, int]], total_queries:Dict[str,int],
+        rho:float) -> Tuple[int, List[Tuple[datetime, Dict[str,int]]], List[Tuple[datetime, int]]]:
+    """
+    data: a dict {sql_text : sorted {occured datetime: freq}};
+    output:
+        next_cluster_id/num_clusters
+        assignment: a list of time indexed assignment
+
+
+    """
     print(rho)
     cluster_gap = 1440
 
-    # covnert in miniutes, then // cluster_gap to convert to days?????
+    # convert in miniutes, then // cluster_gap to convert to days?????
     n = (max_date - min_date).seconds // 60 + \
         (max_date - min_date).days * 1440 + 1
-    num_gaps = n // cluster_gap
+    num_gaps = n // cluster_gap  # the number of days between min and max date
 
     centers = dict()
     cluster_totals = dict()
     cluster_sizes = dict()
 
-    assignments = []
+    assignments: List[Tuple(datetime, Dict[str,int])] = []
     ass = dict()
     for t in data.keys():
         ass[t] = -1
     assignments.append((min_date, ass))
 
     current_date = min_date
-    next_cluster = 0
+    next_cluster_id = 0
     for i in range(num_gaps):
-        next_date = current_date + dt.timedelta(minutes=cluster_gap)
+        next_date = current_date + dt.timedelta(minutes=cluster_gap) # e.g., next day
         # Calculate similarities based on arrival rates up to the past month
-        month_min_date = max(min_date, next_date - dt.timedelta(days=30))
-        assign, next_cluster = AdjustCluster(month_min_date, current_date, next_date, data, assignments[-1][1],
-                                             next_cluster, centers, cluster_totals, total_queries, cluster_sizes, rho)
-        assignments.append((next_date, assign))
+        month_min_date = max(min_date, next_date - dt.timedelta(days=30)) # the historical start point
+        assign_dict, next_cluster_id = AdjustCluster(month_min_date, current_date, next_date, data, assignments[-1][1],
+                                             next_cluster_id, centers, cluster_totals, total_queries, cluster_sizes, rho)
+        assignments.append((next_date, assign_dict))
 
         current_date = next_date
 
-    return next_cluster, assignments, cluster_totals
+    return next_cluster_id, assignments, cluster_totals
 
 
 # ==============================================
@@ -367,7 +375,7 @@ if __name__ == '__main__':
     aparser.add_argument('--dir', default="combined-results",
                          help='The directory that contains the time series'
                          'csv files')
-    aparser.add_argument('--project', help='The name of the workload')
+    aparser.add_argument('--project', default='tiramisu', help='The name of the workload')
     aparser.add_argument('--rho', default=0.8, help='The threshold to determine'
                          'whether a query template belongs to a cluster')
     args = vars(aparser.parse_args())

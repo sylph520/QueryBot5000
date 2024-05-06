@@ -41,22 +41,22 @@ PROJECTS = {
         "input_dir": "../data/online-tiramisu-clusters",
         "cluster_path": "../data/cluster-coverage/tiramisu-coverage.pickle",
         "output_dir":
-        #"../result-interval-new/online-prediction/online-tiramisu-clusters-prediction",
+        # "../result-interval-new/online-prediction/online-tiramisu-clusters-prediction",
         "../result/online-prediction/online-tiramisu-clusters-prediction",
     },
     "admission": {
         "name": "admission",
-        #"input_dir": "../data/online-admission-clusters",
+        # "input_dir": "../data/online-admission-clusters",
         "input_dir":
         "../../peloton-tf/time-series-clustering/online-admission-full-clusters/",
         "cluster_path":
         "../../peloton-tf/time-series-clustering/admission-full-coverage/coverage.pickle",
-        #"cluster_path": "../data/cluster-coverage/admission-coverage.pickle",
+        # "cluster_path": "../data/cluster-coverage/admission-coverage.pickle",
         "output_dir":
-        #"../tmp/",
-        #"../result-admission-full/",
-        #"../result-interval/online-prediction/online-admission-clusters-prediction",
-        #"../result/online-prediction/online-admission-clusters-prediction",
+        # "../tmp/",
+        # "../result-admission-full/",
+        # "../result-interval/online-prediction/online-admission-clusters-prediction",
+        # "../result/online-prediction/online-admission-clusters-prediction",
         "../result/online-prediction/online-admission-full-clusters-prediction",
     },
     "oli": {
@@ -78,8 +78,6 @@ PROJECTS = {
 }
 
 
-
-# %%
 class Args:
     def __init__(self):
         # RNN cell type
@@ -92,15 +90,16 @@ class Args:
         self.lr = 1
         self.clip = 0.25
         # RNN learning epochs for each workload
-        self.epochs = {'tiramisu': 300, "oli": 30, "admission": 30, "noise": 50}
+        self.epochs = {'tiramisu': 300, "oli": 30,
+                       "admission": 30, "noise": 50}
         # Adjust BPTT size accordingly with interval size
-        self.bptt = {1: 240, 5:200, 10:120, 20:90, 30:60, 60:48, 120:30}
+        self.bptt = {1: 240, 5: 200, 10: 120, 20: 90, 30: 60, 60: 48, 120: 30}
         self.dropout = 0.2
         self.tied = False
         self.cuda = False
         self.log_interval = 50
         self.save = 'model.pt'
-        
+
         # PSRNN params
         self.kernel_width = 0.02
         self.nRFF = 25
@@ -110,17 +109,18 @@ class Args:
 
         # added by Lin
         # Adjust batch size accordingly with interval size to save training time
-        self.batch_size = {1: 30, 5:20, 10:15, 20:12, 30:8, 60:4, 120:2}
+        self.batch_size = {1: 30, 5: 20, 10: 15, 20: 12, 30: 8, 60: 4, 120: 2}
         # Prediction horizon size
         self.horizon = 60
         # The training start position
-        self.start_pos = 14400 
+        self.start_pos = 14400
         # Update/Retrain the models every day
         self.interval = 1440
 
         # Always use the past day arrival rates for the regression. Adjusted
         # according to the interval size.
-        self.regress_dim = {1: 1440, 5:288, 10: 144, 20:72, 30:48, 60:24, 120:12}
+        self.regress_dim = {1: 1440, 5: 288,
+                            10: 144, 20: 72, 30: 48, 60: 24, 120: 12}
         # Auto regression order for the ARMA model
         self.ar_order = 6
         # Moving agerage order for the ARMA model
@@ -136,14 +136,12 @@ class Args:
         # Number of clusters to train together
         self.top_cluster_num = 3
 
-# %%
 # AR and ARMA model
 class LinearModel:
     def __init__(self):
         self.params = None
         self.ma_params = None
 
-# %%
 # Kernel Regression (KR) model
 class KernelRegressionModel:
     def __init__(self):
@@ -161,8 +159,8 @@ def batchify(data, bsz):
     data = data.reshape(bsz, -1, nobserve)
 
     # Transpose the data to fit the model input
-    data = data.transpose(1,0,2)
-    
+    data = data.transpose(1, 0, 2)
+
     # data.shape = (sequense length, batch size, dim of the observation)
     return data
 
@@ -170,7 +168,7 @@ def batchify(data, bsz):
 def LoadData(file_path, aggregate):
     trajs = dict()
 
-    datetime_format = "%Y-%m-%d %H:%M:%S" # Strip milliseconds ".%f"
+    datetime_format = "%Y-%m-%d %H:%M:%S"  # Strip milliseconds ".%f"
     for csv_file in sorted(os.listdir(file_path)):
         print(csv_file)
 
@@ -190,9 +188,9 @@ def LoadData(file_path, aggregate):
                 if aggregate > 60:
                     hour //= aggregate // 60
                 time_stamp = datetime(ts.year, ts.month, ts.day, hour, ts.minute - (ts.minute %
-                    aggregate), 0)
+                                                                                    aggregate), 0)
 
-                if not time_stamp in trajs[cluster]:
+                if time_stamp not in trajs[cluster]:
                     trajs[cluster][time_stamp] = 0
 
                 trajs[cluster][time_stamp] += count
@@ -202,20 +200,25 @@ def LoadData(file_path, aggregate):
 
 NTOKENS = 3
 PSRHORIZON = 5
-def obsFun(x): 
-    return x[NTOKENS * PSRHORIZON:NTOKENS * (PSRHORIZON + 1),:]
+def obsFun(x):
+    return x[NTOKENS * PSRHORIZON:NTOKENS * (PSRHORIZON + 1), :]
 
-def pastFun(x): 
-    return x[:NTOKENS * PSRHORIZON,:]
-    
-def futureFun(x): 
-    return x[NTOKENS * PSRHORIZON :NTOKENS * PSRHORIZON * 2,:]
 
-def shiftedFutureFun(x): 
-    return x[NTOKENS * (PSRHORIZON + 1):NTOKENS * (PSRHORIZON * 2 + 1),:]
+def pastFun(x):
+    return x[:NTOKENS * PSRHORIZON, :]
 
-def outputFun(x): 
-    return x[NTOKENS * PSRHORIZON:NTOKENS * (PSRHORIZON + 1),:]
+
+def futureFun(x):
+    return x[NTOKENS * PSRHORIZON:NTOKENS * PSRHORIZON * 2, :]
+
+
+def shiftedFutureFun(x):
+    return x[NTOKENS * (PSRHORIZON + 1):NTOKENS * (PSRHORIZON * 2 + 1), :]
+
+
+def outputFun(x):
+    return x[NTOKENS * PSRHORIZON:NTOKENS * (PSRHORIZON + 1), :]
+
 
 def GeneratePair(data, horizon, input_dim):
     n = data.shape[0]
@@ -230,10 +233,12 @@ def GeneratePair(data, horizon, input_dim):
 
     return (np.array(x), np.array(y))
 
+
 def GetMatrix(x):
     xx = x.T.dot(x)
     xx += np.identity(xx.shape[0])
     return np.linalg.inv(xx).dot(x.T)
+
 
 def Training(x, y):
     params = []
@@ -241,6 +246,7 @@ def Training(x, y):
         params.append(x.dot(y[:, j]))
 
     return params
+
 
 def Testing(params, x):
     y_hat = None
@@ -253,24 +259,27 @@ def Testing(params, x):
         if y_hat is None:
             y_hat = y
         else:
-            y_hat = np.concatenate((y_hat, y), axis = 1)
+            y_hat = np.concatenate((y_hat, y), axis=1)
 
     return y_hat
 
-# %% TRAIN THE MODEL
+# TRAIN THE MODEL
+
 
 def train_pass(args, method, model, data, criterion, lr, bptt, clip, log_interval):
 
     if method == 'arma':
         # Train the ARMA model
         order = (args.ar_order, args.ma_order)
-        arma_model = sm.tsa.VARMAX(data, order=order, enforce_stationarity=False)
-        arma_model = arma_model.fit(maxiter = 10)
+        arma_model = sm.tsa.VARMAX(
+            data, order=order, enforce_stationarity=False)
+        arma_model = arma_model.fit(maxiter=10)
         arma_data = arma_model.predict()
 
         # Combine ARMA output with the original data
         x, y = GeneratePair(data, args.horizon, args.regress_dim)
-        arma_x, arma_y = GeneratePair(arma_data, args.horizon, args.regress_dim)
+        arma_x, arma_y = GeneratePair(
+            arma_data, args.horizon, args.regress_dim)
         x = np.concatenate((x, arma_x), axis=1)
         xx = GetMatrix(x)
 
@@ -278,7 +287,6 @@ def train_pass(args, method, model, data, criterion, lr, bptt, clip, log_interva
         model.params = Training(xx, y)
 
         return
-
 
     if method == 'ar' or method == 'arma':
         x, y = GeneratePair(data, args.horizon, args.regress_dim)
@@ -307,7 +315,7 @@ def train_pass(args, method, model, data, criterion, lr, bptt, clip, log_interva
 
     # Turn on training mode which enables dropout.
     model.train()
-        
+
     total_loss = 0
     losses = []
 
@@ -319,12 +327,13 @@ def train_pass(args, method, model, data, criterion, lr, bptt, clip, log_interva
         horizon = 0
         nbatch = 0
     else:
-        batch_size = max(1, min(args.batch_size, len(data) // (args.horizon + args.bptt)))
+        batch_size = max(1, min(args.batch_size, len(
+            data) // (args.horizon + args.bptt)))
         data = batchify(data, batch_size)
         ndata = data.shape[0]
         nbatch = data.shape[1]
         horizon = args.horizon
-    
+
     hidden = model.init_hidden(nbatch)
     for batch, i in enumerate(range(0, ndata - horizon, bptt)):
         if method == "fnn":
@@ -332,7 +341,8 @@ def train_pass(args, method, model, data, criterion, lr, bptt, clip, log_interva
             targets = y[i: i + bptt]
             targets.reshape((1, targets.shape[0], -1))
         else:
-            data_batch, targets = Utilities.get_batch(data, i, bptt, False, args.horizon)
+            data_batch, targets = Utilities.get_batch(
+                data, i, bptt, False, args.horizon)
 
         input = Variable(torch.Tensor(data_batch.astype(float)))
         targets = Variable(torch.Tensor(targets.astype(float)))
@@ -345,7 +355,7 @@ def train_pass(args, method, model, data, criterion, lr, bptt, clip, log_interva
             input = input.cuda()
             targets = targets.cuda()
         output, hidden = model(input, hidden)
-        
+
         # Calculations for loss
         loss = criterion(output, targets)
         if args.cuda:
@@ -356,19 +366,19 @@ def train_pass(args, method, model, data, criterion, lr, bptt, clip, log_interva
         # Perform Gradient Descent
         loss.backward()
         torch.nn.utils.clip_grad_norm(model.parameters(), clip)
-        
+
         for p in model.parameters():
             p.data.add_(-lr, p.grad.data)
 
         # Print Training Accuracy
         if batch % log_interval == 0:
-            
+
             total_loss /= log_interval
-            
+
             Utilities.prettyPrint(' lr: ' + str(lr) + ' batches: '
-                        + str(batch) + '/'+str(ndata // bptt),
-                        total_loss)       
-            
+                                  + str(batch) + '/'+str(ndata // bptt),
+                                  total_loss)
+
             total_loss = 0
 
     Utilities.prettyPrint('Average Train Loss: ', np.mean(losses))
@@ -379,20 +389,21 @@ def evaluate_pass(args, method, model, data, criterion, bptt):
     if method == 'arma':
         # Train the ARMA model
         order = (args.ar_order, args.ma_order)
-        arma_model = sm.tsa.VARMAX(data, order=order, enforce_stationarity=False)
-        arma_model = arma_model.fit(maxiter = 10)
+        arma_model = sm.tsa.VARMAX(
+            data, order=order, enforce_stationarity=False)
+        arma_model = arma_model.fit(maxiter=10)
         arma_data = arma_model.predict()
 
         # Combine ARMA output with the original data
         x, y = GeneratePair(data, args.horizon, args.regress_dim)
-        arma_x, arma_y = GeneratePair(arma_data, args.horizon, args.regress_dim)
+        arma_x, arma_y = GeneratePair(
+            arma_data, args.horizon, args.regress_dim)
         x = np.concatenate((x, arma_x), axis=1)
 
         # Test the model using the combined data
         y_hat = Testing(model.params, x)
 
         return np.mean((y - y_hat) ** 2), y, y_hat
-
 
     if method == 'ar' or method == 'arma':
         x, y = GeneratePair(data, args.horizon, args.regress_dim)
@@ -421,13 +432,12 @@ def evaluate_pass(args, method, model, data, criterion, bptt):
 
         pairwise_sq_dists = sp.spatial.distance.cdist(x, k_x, 'seuclidean')
         kernel = sp.exp(-pairwise_sq_dists)
-        y_hat = kernel.dot(k_y) / np.sum(kernel, axis = 1, keepdims = True)
+        y_hat = kernel.dot(k_y) / np.sum(kernel, axis=1, keepdims=True)
 
         return np.mean((y - y_hat) ** 2), y, y_hat
 
-
     model.eval()
-        
+
     total_loss = 0
 
     if method == 'fnn':
@@ -440,7 +450,7 @@ def evaluate_pass(args, method, model, data, criterion, bptt):
     else:
         # Because the prediction must be continuous, we cannot use batch here
         data = batchify(data, 1)
-        #data = batchify(data, args.batch_size)
+        # data = batchify(data, args.batch_size)
         ndata = data.shape[0]
         nbatch = data.shape[1]
         horizon = args.horizon
@@ -456,7 +466,8 @@ def evaluate_pass(args, method, model, data, criterion, bptt):
             targets = y_data[i: i + bptt]
             targets = targets.reshape((1, targets.shape[0], -1))
         else:
-            data_batch, targets = Utilities.get_batch(data, i, bptt, False, args.horizon)
+            data_batch, targets = Utilities.get_batch(
+                data, i, bptt, False, args.horizon)
 
         input = Variable(torch.Tensor(data_batch.astype(float)))
         targets = Variable(torch.Tensor(targets.astype(float)))
@@ -468,17 +479,17 @@ def evaluate_pass(args, method, model, data, criterion, bptt):
         if hidden is not None:
             hidden = Utilities.repackage_hidden(hidden)
         output, hidden = model(input, hidden)
-        
+
         # Calculations for loss
         loss = criterion(output, targets)
-    
+
         if args.cuda:
             loss = loss.cpu()
             targets = targets.cpu()
             output = output.cpu()
 
         total_loss += loss.data.numpy()
-        
+
         if y is None:
             y = targets.data.numpy()
         else:
@@ -502,38 +513,40 @@ def GetModel(args, data, method):
     ntokens = train.shape[2]
     bsz = train.shape[1]
 
-    #%% BUILD THE MODEL
+    # BUILD THE MODEL
     if method == "fnn":
         model = FNN_Model.FNN_Model(args.model, ntokens, args.regress_dim, args.nRFF, args.nhid,
-                args.nlayers, args.dropout, args.tied)
+                                    args.nlayers, args.dropout, args.tied)
 
     if method == "rnn":
-        model = RNN_Model.RNN_Model(args.model, ntokens, args.nRFF, args.nhid, args.nlayers, args.dropout, args.tied)
+        model = RNN_Model.RNN_Model(
+            args.model, ntokens, args.nRFF, args.nhid, args.nlayers, args.dropout, args.tied)
 
     if method == "psrnn":
         model = PSRNN_Model.PSRNN_Model(args.model, ntokens, args.nRFF, args.nhid, args.nlayers,
-                args.dropout, args.tied, args.cuda)
+                                        args.dropout, args.tied, args.cuda)
 
-        # %% TWO STAGE REGRESSION
+        # TWO STAGE REGRESSION
         data_len = 2 * PSRHORIZON + 1
-        stacked_data = np.empty((ntokens * data_len,0))
+        stacked_data = np.empty((ntokens * data_len, 0))
         for i in range(bsz):
             data_list = []
             train_len = len(train)
             for j in range(data_len):
                 data_list.append(train[j:train_len - data_len + j + 1, i, :])
             batch = np.hstack(tuple(data_list))
-            stacked_data = np.concatenate([stacked_data, batch.T],1)
+            stacked_data = np.concatenate([stacked_data, batch.T], 1)
 
         rbf_sampler, U_obs, W_FE_F_weight, W_FE_F_bias, W_pred_weight, W_pred_bias, x_1 = \
-        Two_Stage_Regression.two_stage_regression(stacked_data, obsFun, pastFun, futureFun, shiftedFutureFun, outputFun, args)
+            Two_Stage_Regression.two_stage_regression(
+                stacked_data, obsFun, pastFun, futureFun, shiftedFutureFun, outputFun, args)
 
         # Initialize with PSR
         model.init_weights_psr(rbf_sampler.random_weights_.T,
-                               rbf_sampler.random_offset_, 
+                               rbf_sampler.random_offset_,
                                U_obs,
                                W_FE_F_weight,
-                               W_FE_F_bias, 
+                               W_FE_F_bias,
                                W_pred_weight,
                                W_pred_bias,
                                x_1)
@@ -544,10 +557,9 @@ def GetModel(args, data, method):
     if method == "kr":
         return KernelRegressionModel()
 
-
-    #model = RNN_RBF_Model(args.model, ntokens, args.nRFF, args.nhid, args.nlayers, args.dropout, args.tied)
-    #model = PSRNN_Nonlinear_Model_backup.PSRNN_Nonlinear_Model_backup(args.model, ntokens, args.nRFF, args.nhid, args.nlayers, args.dropout, args.tied)
-    #model = PSRNN_Factorized_Model.PSRNN_Factorized_Model(args.model, ntokens, args.nRFF, \
+    # model = RNN_RBF_Model(args.model, ntokens, args.nRFF, args.nhid, args.nlayers, args.dropout, args.tied)
+    # model = PSRNN_Nonlinear_Model_backup.PSRNN_Nonlinear_Model_backup(args.model, ntokens, args.nRFF, args.nhid, args.nlayers, args.dropout, args.tied)
+    # model = PSRNN_Factorized_Model.PSRNN_Factorized_Model(args.model, ntokens, args.nRFF, \
     #                                                      args.nhid, args.nlayers, args.dropout, args.nhid*30)
 
     if args.cuda:
@@ -555,9 +567,10 @@ def GetModel(args, data, method):
 
     return model
 
+
 def GetMultiData(trajs, clusters, date, num_days, interval, num_mins, aggregate):
-    date_list = [date - timedelta(minutes = x) for x in range(num_days * interval * aggregate,
-        -num_mins, -aggregate)]
+    date_list = [date - timedelta(minutes=x) for x in range(num_days * interval * aggregate,
+                                                            -num_mins, -aggregate)]
 
     traj = []
 
@@ -565,8 +578,8 @@ def GetMultiData(trajs, clusters, date, num_days, interval, num_mins, aggregate)
         obs = []
         for c in clusters:
             if c in trajs:
-                data_date = next(trajs[c].irange(maximum = date, inclusive = (True, False), reverse =
-                    True), None)
+                data_date = next(trajs[c].irange(
+                    maximum=date, inclusive=(True, False), reverse=True), None)
             else:
                 data_date = None
                 print("cluster %d is not in trajs!!!", c)
@@ -583,6 +596,7 @@ def GetMultiData(trajs, clusters, date, num_days, interval, num_mins, aggregate)
 
     return traj
 
+
 def Normalize(data):
     # normalizing data
     data_min = 1 - np.min(data)
@@ -594,10 +608,10 @@ def Normalize(data):
 
     return data, data_min, data_mean, data_std
 
-def Predict(args, config, top_cluster, trajs, method):
 
+def Predict(args, config, top_cluster, trajs, method):
     for date, cluster_list in top_cluster[args.start_pos // args.interval:- max(args.horizon //
-            args.interval, 1)]:
+                                                                                args.interval, 1)]:
         # Training delta
         if config['name'] == "admission":
             first_date = datetime(2016, 9, 18)
@@ -606,27 +620,28 @@ def Predict(args, config, top_cluster, trajs, method):
         else:
             first_date = top_cluster[0][0]
         train_delta_intervals = min(((date - first_date).days * 1440 + (date - first_date).seconds // 60
-            ) // (args.aggregate * args.interval), args.training_intervals)
-        #print(train_delta_intervals)
-        #print(date, first_date)
+                                     ) // (args.aggregate * args.interval), args.training_intervals)
+        # print(train_delta_intervals)
+        # print(date, first_date)
         # Predict delta
         predict_delta_mins = args.horizon * args.aggregate
 
-        print(date, first_date, date + timedelta(minutes = predict_delta_mins))
+        print(date, first_date, date + timedelta(minutes=predict_delta_mins))
 
         clusters = next(zip(*cluster_list))[:args.top_cluster_num]
 
-        data = GetMultiData(trajs, clusters, date, train_delta_intervals, args.interval, predict_delta_mins, args.aggregate)
-
+        data = GetMultiData(trajs, clusters, date, train_delta_intervals,
+                            args.interval, predict_delta_mins, args.aggregate)
 
         data, data_min, data_mean, data_std = Normalize(data)
 
-        #print(data)
+        # print(data)
         print(data.shape)
-        #print(args.interval, args.horizon)
+        # print(args.interval, args.horizon)
         train_data = data[:-args.interval - args.horizon]
         print(train_data.shape)
-        test_data = data[-(args.paddling_intervals * args.interval + args.horizon + args.interval):]
+        test_data = data[-(args.paddling_intervals *
+                           args.interval + args.horizon + args.interval):]
         print(test_data.shape)
 
         model = GetModel(args, train_data, method)
@@ -640,15 +655,18 @@ def Predict(args, config, top_cluster, trajs, method):
             lr = args.lr
             if epoch > 100:
                 lr = 0.2
-            train_pass(args, method, model, train_data, criterion, lr, args.bptt, args.clip, args.log_interval)
+            train_pass(args, method, model, train_data, criterion,
+                       lr, args.bptt, args.clip, args.log_interval)
             print('about to evaluate: ')
-            val_loss, y, y_hat, = evaluate_pass(args, method, model, test_data, criterion, args.bptt)
+            val_loss, y, y_hat, = evaluate_pass(
+                args, method, model, test_data, criterion, args.bptt)
             Utilities.prettyPrint('Validation Loss: Epoch'+str(epoch), np.mean((y[-args.interval:] -
-                y_hat[-args.interval:]) ** 2))
+                                                                                y_hat[-args.interval:]) ** 2))
 
         # Run on test data.
         print('about to test')
-        test_loss, y, y_hat= evaluate_pass(args, method, model, test_data, criterion, args.bptt)
+        test_loss, y, y_hat = evaluate_pass(
+            args, method, model, test_data, criterion, args.bptt)
 
         y = y[-args.interval:]
         y_hat = y_hat[-args.interval:]
@@ -658,20 +676,22 @@ def Predict(args, config, top_cluster, trajs, method):
         y = np.exp(y * data_std + data_mean) - data_min
         y_hat = np.exp(y_hat * data_std + data_mean) - data_min
 
-        predict_dates = [date + timedelta(minutes = args.horizon * args.aggregate - x) for x in
-                range(args.interval * args.aggregate, 0, -args.aggregate)]
+        predict_dates = [date + timedelta(minutes=args.horizon * args.aggregate - x) for x in
+                         range(args.interval * args.aggregate, 0, -args.aggregate)]
         for i, c in enumerate(clusters):
-            WriteResult(config['output_dir'] + str(c) + ".csv", predict_dates, y[:, i], y_hat[:, i])
+            WriteResult(config['output_dir'] + str(c) +
+                        ".csv", predict_dates, y[:, i], y_hat[:, i])
 
-        #WriteResult(config['output_dir'] + "total.csv", predict_dates, np.sum(y, axis = 1),
+        # WriteResult(config['output_dir'] + "total.csv", predict_dates, np.sum(y, axis = 1),
         #        np.sum(y_hat, axis = 1))
 
 
 def WriteResult(path, dates, actual, predict):
     with open(path, "a") as csvfile:
-        writer = csv.writer(csvfile, quoting = csv.QUOTE_ALL)
+        writer = csv.writer(csvfile, quoting=csv.QUOTE_ALL)
         for x in range(len(dates)):
             writer.writerow([dates[x], actual[x], predict[x]])
+
 
 def Main(config, method, aggregate, horizon, input_dir, output_dir, cluster_path):
     args = Args()
@@ -688,14 +708,13 @@ def Main(config, method, aggregate, horizon, input_dir, output_dir, cluster_path
         args.paddling_intervals = 30
         if method == 'rnn':
             args.epochs = 200
-        
+
     if config['name'] == "noise":
         args.interval = 60
         args.start_pos = 120
         args.training_intervals = 3
         args.paddling_intervals = 1
         args.regress_dim[aggregate] = 5
-
 
     global NTOKENS
     NTOKENS = args.top_cluster_num
@@ -742,17 +761,20 @@ def Main(config, method, aggregate, horizon, input_dir, output_dir, cluster_path
 # main
 # ==============================================
 if __name__ == '__main__':
-    aparser = argparse.ArgumentParser(description='Online timeseries prediction')
-    aparser.add_argument('project', choices=PROJECTS.keys(), help='Data source type')
+    aparser = argparse.ArgumentParser(
+        description='Online timeseries prediction')
+    aparser.add_argument('project', choices=PROJECTS.keys(),
+                         help='Data source type')
     aparser.add_argument('--method', help='Input Data Directory')
-    aparser.add_argument('--aggregate', default=1, type=int, help='Aggregate the results by how many minutes')
+    aparser.add_argument('--aggregate', default=1, type=int,
+                         help='Aggregate the results by how many minutes')
     aparser.add_argument('--horizon', default=60, type=int, help='How far do we predict ahead'
-            '(minutes)')
+                         '(minutes)')
     aparser.add_argument('--input_dir', help='Input directory')
     aparser.add_argument('--output_dir', help='Output directory')
-    aparser.add_argument('--cluster_path', help='Path of the clustering assignment')
+    aparser.add_argument(
+        '--cluster_path', help='Path of the clustering assignment')
     args = vars(aparser.parse_args())
 
     Main(PROJECTS[args['project']], args['method'], args['aggregate'], args['horizon'],
-            args['input_dir'], args['output_dir'], args['cluster_path'])
-
+         args['input_dir'], args['output_dir'], args['cluster_path'])
